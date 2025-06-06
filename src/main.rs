@@ -11,6 +11,8 @@ use photon_rs::native::{open_image, save_image};
 use photon_rs::transform::{SamplingFilter, compress, resize};
 use sha1::Sha1;
 use std::sync::Arc;
+use tracing::{debug, info};
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 /// defines root commands
 #[derive(Parser)]
@@ -30,7 +32,7 @@ enum Commands {
 }
 
 /// defines args/options for `process` subcommand
-#[derive(Args)]
+#[derive(Args, Debug)]
 struct ProcessArgs {
     #[arg(short, long, default_value = "./input.jpg")]
     src_file: PathBuf,
@@ -47,6 +49,7 @@ struct ProcessArgs {
 /// resizes image based on specified `<w>x<h>` string, if either `w` or `h` are 0, that
 /// dimension will be computed based on the ratio of defined dimension, might not be exact due
 /// to floating point rounding
+#[tracing::instrument]
 fn resize_image(mut img: &PhotonImage, size: String) -> PhotonImage {
     let dims: Vec<&str> = size.split("x").collect();
     let w_orig: f32 = img.get_width() as f32;
@@ -78,6 +81,7 @@ fn resize_image(mut img: &PhotonImage, size: String) -> PhotonImage {
 /// subcommand for `process`
 /// opens image, transforms image based on operations and then saves the transformed image to
 /// disk. output format is inferred from file extension (photon-rs' behavior)
+#[tracing::instrument]
 fn process(args: &ProcessArgs) {
     println!("source: {}", args.src_file.display());
     println!("destination: {}", args.dst_file.display());
@@ -116,6 +120,7 @@ struct ServeArgs {
 }
 
 /// defines AppState that is passed to handlers of `serve`
+#[derive(Debug)]
 struct AppState {
     src_path: PathBuf,
     cache_path: PathBuf,
@@ -123,7 +128,9 @@ struct AppState {
 }
 
 /// simple health check
+#[tracing::instrument]
 async fn health_handler(State(state): State<Arc<AppState>>) -> String {
+    info!("HEALTH CHECK");
     format!(
         "stuff is responding, src: {}, cache: {}",
         state.src_path.display(),
@@ -132,10 +139,12 @@ async fn health_handler(State(state): State<Arc<AppState>>) -> String {
 }
 
 /// IN PROGRESS; will eventually respond with processed image
+#[tracing::instrument]
 async fn pic_handler(
     Path((hmac, part)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
 ) -> String {
+    info!("THUMBOR");
     // TODO: check signature
     let computed_hmac = hmac_signature(state.signature_secret.clone(), part.clone(), &URL_SAFE);
 
@@ -154,13 +163,14 @@ async fn pic_handler(
 /// starts axum webserver
 #[tokio::main]
 async fn serve(args: &ServeArgs) {
+    debug!("starting web-server");
     let shared_state = Arc::new(AppState {
         src_path: args.src_path.clone(),
         cache_path: args.cache_path.clone(),
         signature_secret: args.secret_key.clone(),
     });
 
-    println!(
+    debug!(
         "address: {}, src: {}, cache: {}",
         args.address,
         args.src_path.display(),
@@ -179,7 +189,7 @@ async fn serve(args: &ServeArgs) {
 }
 
 /// defines args/options for `path-signature`
-#[derive(Args)]
+#[derive(Args, Debug)]
 struct PathSigArgs {
     /// sensitive key used to generate HMAC signature; environment variable value will not be
     /// displayed in `--help` output
@@ -194,6 +204,7 @@ struct PathSigArgs {
 }
 
 /// generates HMAC signature
+#[tracing::instrument]
 fn hmac_signature(key: String, msg: String, alphabet: &base64::engine::GeneralPurpose) -> String {
     /// from: https://stackoverflow.com/questions/71632964/rust-equivalent-of-hmac-digest-in-python/71633139#71633139
     /// generates an HMAC signature from key and msg (the image part of the thumbor URL)
@@ -209,16 +220,23 @@ fn hmac_signature(key: String, msg: String, alphabet: &base64::engine::GeneralPu
 }
 
 /// subcommand for `path-signature`
+#[tracing::instrument]
 fn thumbor_path_signature(args: &PathSigArgs) {
     let signature_urlsafe = hmac_signature(args.secret_key.clone(), args.part.clone(), &URL_SAFE);
     let signature = hmac_signature(args.secret_key.clone(), args.part.clone(), &STANDARD);
-    println!(
+    info!(
         "signature (urlsafe):     {}\nsignature (non-urlsafe): {}",
         signature_urlsafe, signature
     );
 }
 
 fn main() {
+    // log level can be controlled with RUST_LOG env-var
+    let filter = EnvFilter::from_default_env();
+    let filtered_layer = fmt::layer().with_filter(filter);
+    tracing_subscriber::registry().with(filtered_layer).init();
+
+    info!("starting CLI");
     let cli = Cli::parse();
     match &cli.command {
         Commands::Process(args) => process(args),
