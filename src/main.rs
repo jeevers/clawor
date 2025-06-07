@@ -1,18 +1,19 @@
 use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 //use photon_rs::channels::alter_red_channel;
-use axum::{Router, extract::Path, extract::State, routing::get};
+use axum::{extract::Path, extract::State, routing::get, Router};
 use base64::{
     display::Base64Display, engine::general_purpose::STANDARD, engine::general_purpose::URL_SAFE,
 };
 use hmac::{Hmac, Mac};
-use photon_rs::PhotonImage;
 use photon_rs::native::{open_image, save_image};
-use photon_rs::transform::{SamplingFilter, compress, resize};
+use photon_rs::transform::{compress, resize, SamplingFilter};
+use photon_rs::PhotonImage;
+use secrecy::{ExposeSecret, SecretString};
 use sha1::Sha1;
 use std::sync::Arc;
 use tracing::{debug, info};
-use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 /// defines root commands
 #[derive(Parser)]
@@ -116,7 +117,7 @@ struct ServeArgs {
     /// displayed in `--help` output
     // SECRET_KEY env-var
     #[arg(long, env, hide_env_values = true, default_value = "secret")]
-    secret_key: String,
+    secret_key: SecretString,
 }
 
 /// defines AppState that is passed to handlers of `serve`
@@ -124,7 +125,7 @@ struct ServeArgs {
 struct AppState {
     src_path: PathBuf,
     cache_path: PathBuf,
-    signature_secret: String,
+    signature_secret: SecretString,
 }
 
 /// simple health check
@@ -196,7 +197,7 @@ struct PathSigArgs {
 
     // SECRET_KEY env-var, as well as '--secret-key'
     #[arg(long, env, hide_env_values = true, default_value = "secret")]
-    secret_key: String,
+    secret_key: SecretString,
     /// the part of the thumbor URL that contains the image transformation params and image path;
     /// i.e. `210x138/filters:no_upscale():max_bytes(150000):strip_icc():format(webp)/someimage.jpg`
     #[arg(short, long)]
@@ -205,14 +206,18 @@ struct PathSigArgs {
 
 /// generates HMAC signature
 #[tracing::instrument]
-fn hmac_signature(key: String, msg: String, alphabet: &base64::engine::GeneralPurpose) -> String {
+fn hmac_signature(
+    key: SecretString,
+    msg: String,
+    alphabet: &base64::engine::GeneralPurpose,
+) -> String {
     /// from: https://stackoverflow.com/questions/71632964/rust-equivalent-of-hmac-digest-in-python/71633139#71633139
     /// generates an HMAC signature from key and msg (the image part of the thumbor URL)
     /// alphabet is the charset that base64 uses to output the signature, currently can be
     /// &STANDARD (standard base64 charset) or &URL_SAFE (charset that allows the signature to be
     /// used in a URL path)
     type HmacSha1 = Hmac<Sha1>;
-    let mut mac = HmacSha1::new_from_slice(key.as_bytes()).unwrap();
+    let mut mac = HmacSha1::new_from_slice(key.expose_secret().as_bytes()).unwrap();
     mac.update(&msg.as_bytes());
     let code_bytes = mac.finalize().into_bytes();
 
@@ -224,7 +229,7 @@ fn hmac_signature(key: String, msg: String, alphabet: &base64::engine::GeneralPu
 fn thumbor_path_signature(args: &PathSigArgs) {
     let signature_urlsafe = hmac_signature(args.secret_key.clone(), args.part.clone(), &URL_SAFE);
     let signature = hmac_signature(args.secret_key.clone(), args.part.clone(), &STANDARD);
-    info!(
+    println!(
         "signature (urlsafe):     {}\nsignature (non-urlsafe): {}",
         signature_urlsafe, signature
     );
