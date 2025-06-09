@@ -311,6 +311,7 @@ dependencies = [
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "photon-rs",
+ "regex",
  "secrecy",
  "sha1",
  "tokio",
