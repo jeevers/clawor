@@ -25,11 +25,35 @@ pub fn hmac_signature(
     return Base64Display::new(&code_bytes.to_vec(), alphabet).to_string();
 }
 
+// struct defining operations passed as thumbor url
+pub struct ThumborUrlParams {
+    // hash is either a string or None
+    hash: Option<String>,
+    debug: bool,
+    meta: bool,
+    trim: String,
+    crop_left: u32,
+    crop_top: u32,
+    crop_right: u32,
+    crop_bottom: u32,
+    adaptive: String,
+    full: String,
+    fit_in: String,
+    horizontal_flip: bool,
+    vertical_flip: bool,
+    width: u32,
+    height: u32,
+    smart: bool,
+    filters: Vec<String>,
+    image: String,
+}
+
 /// parse thumbor style url (without hmac signature)
-pub fn parse_thumbor_path(path: String) {
+pub fn parse_thumbor_path(path: String, no_hash: bool) {
     // adapted from libthumbor:
     // https://github.com/thumbor/libthumbor/blob/master/libthumbor/url.py
-    let regex_patt_parts = [
+    let mut thumbor_req: ThumborUrlParams;
+    let mut regex_patt_parts = vec![
         r"/?",
         r"(?:(?:(?P<unsafe>unsafe)|(?P<hash>.+?))/)?", // unsafe_or_hash
         r"(?:(?P<debug>debug)/)?",                     // debug
@@ -45,10 +69,46 @@ pub fn parse_thumbor_path(path: String) {
         r"(?P<image>.+)",                       // image
     ];
 
+    if no_hash {
+        regex_patt_parts.remove(1);
+    }
     let full_regex = regex_patt_parts.join("");
     let re = Regex::new(&full_regex).unwrap();
 
-    let Some(caps) = re.captures(&path) else { return };
+    let Some(caps) = re.captures(&path) else {
+        return;
+    };
 
-    println!("{:?}", caps);
+    println!("{:?}", &caps);
+
+    match &caps.name("image") {
+        Some(value) => {
+            println!("image:{}", value.as_str());
+            thumbor_req.image = value.as_str().to_string();
+        }
+        None => {}
+    }
+
+    /*tracing::info!("hash:{}", &caps["hash"]);
+    tracing::info!("resize:{}x{}", &caps["width"], &caps["height"]);
+    tracing::info!(
+        "hflip:{}, vflip:{}",
+        &caps["horizontal_flip"],
+        &caps["vertical_flip"]
+    );*/
+    /*tracing::info!(
+        "meta:{}, debug:{}, smart:{}, adaptive:{}",
+        &caps["meta"],
+        &caps["debug"],
+        &caps["smart"],
+        &caps["adaptive"]
+    );
+    tracing::info!(
+        "trim:{}, crop:{}x{}:{}x{}",
+        &caps["trim"],
+        &caps["crop_left"],
+        &caps["crop_top"],
+        &caps["crop_right"],
+        &caps["crop_bottom"]
+    );*/
 }
