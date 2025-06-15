@@ -11,7 +11,7 @@ use clap::{Parser, Subcommand};
 use tracing::info;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
-/// defines root commands
+/// Clawor: a rust-based kinda-sorta re-implementation of the Thumbor image resizer
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 #[command(propagate_version = true)]

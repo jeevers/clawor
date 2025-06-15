@@ -4,9 +4,9 @@ use std::path::PathBuf;
 //use photon_rs::channels::alter_red_channel;
 use crate::common::parse_thumbor_path;
 use crate::image_processing::resize_image;
-use photon_rs::PhotonImage;
 use photon_rs::native::{open_image, save_image};
 use photon_rs::transform::compress;
+use photon_rs::PhotonImage;
 
 /// opens image, transforms image based on supplied options and then saves the transformed image to
 /// disk. output format is inferred from file extension (photon-rs' behavior)
@@ -40,7 +40,8 @@ pub fn process(args: &ProcessArgs) {
     let mut output: PhotonImage = img.clone();
 
     if args.url != "" {
-        parse_thumbor_path(args.url.clone(), args.no_hash.clone());
+        let _ =
+            parse_thumbor_path(args.url.clone(), args.no_hash.clone()).expect("url is parsable");
     } else {
         match &args.resize {
             Some(dimensions) => output = resize_image(&mut output, dimensions.to_string()),

@@ -1,6 +1,14 @@
 /// for `serve` subcommand
-use crate::common::hmac_signature;
-use axum::{extract::Path, extract::State, routing::get, Router};
+use crate::common::{hmac_signature, parse_thumbor_path};
+use axum::{
+    body::Body,
+    extract::Path,
+    extract::State,
+    http::{header, StatusCode},
+    response::Response,
+    routing::get,
+    Router,
+};
 use base64::engine::general_purpose::URL_SAFE;
 use clap::Args;
 use secrecy::SecretString;
@@ -51,20 +59,35 @@ async fn health_handler(State(state): State<Arc<AppState>>) -> String {
 async fn pic_handler(
     Path((hmac, part)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
-) -> String {
+) -> Response {
     info!("THUMBOR");
-    // TODO: check signature
     let computed_hmac = hmac_signature(state.signature_secret.clone(), part.clone(), &URL_SAFE);
+    let parsed_url = parse_thumbor_path(format!("{}/{}", hmac, part), false);
+    // TODO: check signature
+    match parsed_url {
+        Ok(_url) => {}
+        Err(_err) => {
+            return Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .header(header::SERVER, "axum-clawor")
+                .body(Body::from("invalid url"))
+                .unwrap()
+        }
+    }
 
     // check url after signature in cache and file (last item in path) in src
-    format!(
-        "hmac: {}, url part: {}, src: {}, cache: {}\n computed hmac: {}",
-        hmac,
-        part,
-        state.src_path.display(),
-        state.cache_path.display(),
-        computed_hmac,
-    )
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::SERVER, "axum-clawor")
+        .body(Body::from(format!(
+            "hmac: {}, url part: {}, src: {}, cache: {}\n computed hmac: {}",
+            hmac,
+            part,
+            state.src_path.display(),
+            state.cache_path.display(),
+            computed_hmac,
+        )))
+        .unwrap()
 }
 
 /// starts axum webserver
