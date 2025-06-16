@@ -1,20 +1,20 @@
 /// for `serve` subcommand
 use crate::common::{hmac_signature, parse_thumbor_path};
 use axum::{
+    Router,
     body::Body,
     extract::Path,
     extract::State,
-    http::{header, StatusCode},
+    http::{StatusCode, header},
     response::Response,
     routing::get,
-    Router,
 };
 use base64::engine::general_purpose::URL_SAFE;
 use clap::Args;
 use secrecy::SecretString;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 /// Starts a webserver that serves transformed images based on thumbor's url path scheme
 #[derive(Args)]
@@ -65,29 +65,40 @@ async fn pic_handler(
     let parsed_url = parse_thumbor_path(format!("{}/{}", hmac, part), false);
     // TODO: check signature
     match parsed_url {
-        Ok(_url) => {}
+        Ok(url) => {
+            if url.hash.unwrap() != computed_hmac {
+                error!("hash validation/verification failed");
+                return Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .header(header::SERVER, "axum-clawor")
+                    .body(Body::from("invalid url"))
+                    .unwrap();
+            } else {
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .header(header::SERVER, "axum-clawor")
+                    .body(Body::from(format!(
+                        "hmac: {}, url part: {}, src: {}, cache: {}\n computed hmac: {}",
+                        hmac,
+                        part,
+                        state.src_path.display(),
+                        state.cache_path.display(),
+                        computed_hmac,
+                    )))
+                    .unwrap()
+            }
+        }
         Err(_err) => {
+            error!("regex parsing failed");
             return Response::builder()
                 .status(StatusCode::BAD_REQUEST)
                 .header(header::SERVER, "axum-clawor")
                 .body(Body::from("invalid url"))
-                .unwrap()
+                .unwrap();
         }
     }
 
     // check url after signature in cache and file (last item in path) in src
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(header::SERVER, "axum-clawor")
-        .body(Body::from(format!(
-            "hmac: {}, url part: {}, src: {}, cache: {}\n computed hmac: {}",
-            hmac,
-            part,
-            state.src_path.display(),
-            state.cache_path.display(),
-            computed_hmac,
-        )))
-        .unwrap()
 }
 
 /// starts axum webserver

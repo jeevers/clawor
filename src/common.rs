@@ -29,8 +29,8 @@ pub fn hmac_signature(
 #[derive(Default, Debug)]
 pub struct ThumborUrlParams {
     // hash is either a string or None
-    unsafe_hash: bool,
-    hash: Option<String>,
+    pub unsafe_hash: bool,
+    pub hash: Option<String>,
     /*debug: bool,
     meta: bool,
     trim: String,
@@ -43,8 +43,8 @@ pub struct ThumborUrlParams {
     fit_in: String,
     horizontal_flip: bool,
     vertical_flip: bool,*/
-    width: u32,
-    height: u32,
+    pub width: u32,
+    pub height: u32,
     /*smart: bool,
     filters: Vec<String>,*/
     image: String,
@@ -93,7 +93,7 @@ pub fn parse_thumbor_path(path: String, no_hash: bool) -> Result<ThumborUrlParam
     let re = Regex::new(&full_regex).unwrap();
 
     let Some(caps) = re.captures(&path) else {
-        return Err("regex failed")
+        return Err("regex failed");
     };
 
     println!("{:?}", &caps);
