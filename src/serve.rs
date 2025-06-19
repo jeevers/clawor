@@ -11,10 +11,12 @@ use axum::{
 };
 use base64::engine::general_purpose::URL_SAFE;
 use clap::Args;
+use photon_rs::PhotonImage;
 use secrecy::SecretString;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::{debug, error, info};
+use tokio::fs::read;
+use tracing::{Level, debug, error, info, span};
 
 /// Starts a webserver that serves transformed images based on thumbor's url path scheme
 #[derive(Args)]
@@ -60,8 +62,10 @@ async fn pic_handler(
     Path((hmac, part)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    info!("THUMBOR");
+    info!("THUM ON MY BOR TILL IT RESIZE");
+
     let computed_hmac = hmac_signature(state.signature_secret.clone(), part.clone(), &URL_SAFE);
+
     let parsed_url = parse_thumbor_path(format!("{}/{}", hmac, part), false);
     // TODO: check signature
     match parsed_url {
@@ -71,21 +75,48 @@ async fn pic_handler(
                 return Response::builder()
                     .status(StatusCode::BAD_REQUEST)
                     .header(header::SERVER, "axum-clawor")
+                    .header(header::CONTENT_TYPE, "text/plain")
+                    .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
                     .body(Body::from("invalid url"))
                     .unwrap();
             } else {
-                Response::builder()
-                    .status(StatusCode::OK)
-                    .header(header::SERVER, "axum-clawor")
-                    .body(Body::from(format!(
-                        "hmac: {}, url part: {}, src: {}, cache: {}\n computed hmac: {}",
-                        hmac,
-                        part,
-                        state.src_path.display(),
-                        state.cache_path.display(),
-                        computed_hmac,
-                    )))
-                    .unwrap()
+                let image_path = state.src_path.join(url.image);
+                let image_data = read(&image_path).await;
+                match image_data {
+                    Err(err) => {
+                        debug!(
+                            "failed to open '{}': {}",
+                            &image_path.to_str().unwrap(),
+                            err
+                        );
+                        return Response::builder()
+                            .status(StatusCode::NOT_FOUND)
+                            .header(header::SERVER, "axum-clawor")
+                            .header(header::CONTENT_TYPE, "text/plain")
+                            .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
+                            .body(Body::from("shrugmoji"))
+                            .unwrap();
+                    }
+                    Ok(file) => {
+                        let phimage = PhotonImage::new_from_byteslice(file);
+                        return Response::builder()
+                            .status(StatusCode::OK)
+                            .header(header::SERVER, "axum-clawor")
+                            .header("x-clawor-hmac", &hmac)
+                            .header("x-clawor-computed-hmac", &computed_hmac)
+                            .header("x-clawor-part", &part)
+                            .header(
+                                "x-clawor-src-path",
+                                state.src_path.clone().to_str().unwrap(),
+                            )
+                            .header(
+                                "x-clawor-cache-path",
+                                state.cache_path.clone().to_str().unwrap(),
+                            )
+                            .body(Body::from(phimage.get_bytes_jpeg(50))) // get_bytes returns png
+                            .unwrap();
+                    }
+                }
             }
         }
         Err(_err) => {
@@ -93,17 +124,41 @@ async fn pic_handler(
             return Response::builder()
                 .status(StatusCode::BAD_REQUEST)
                 .header(header::SERVER, "axum-clawor")
+                .header(header::CONTENT_TYPE, "text/plain")
+                .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
                 .body(Body::from("invalid url"))
                 .unwrap();
         }
     }
-
-    // check url after signature in cache and file (last item in path) in src
 }
 
 /// starts axum webserver
 #[tokio::main]
 pub async fn serve_app(args: &ServeArgs) {
+    debug!("creating directories if they don't exist");
+    match args.src_path.try_exists() {
+        Ok(true) => debug!("src images directory exists"),
+        Ok(false) => panic!(
+            "src image directory '{}' does not exist",
+            args.src_path.to_str().unwrap()
+        ),
+        Err(err) => panic!("error checking src directory: {}", err),
+    }
+    match args.cache_path.try_exists() {
+        Ok(true) => debug!(
+            "src images directory '{}' exists",
+            args.cache_path.to_str().unwrap()
+        ),
+        Ok(false) => {
+            std::fs::create_dir(args.cache_path.clone())
+                .expect("cache directory should be created");
+            debug!(
+                "created cache directory '{}'",
+                args.cache_path.to_str().unwrap()
+            );
+        }
+        Err(err) => panic!("error checking cache directory: {}", err),
+    }
     debug!("starting web-server");
     let shared_state = Arc::new(AppState {
         src_path: args.src_path.clone(),

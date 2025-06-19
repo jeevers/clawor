@@ -47,7 +47,7 @@ pub struct ThumborUrlParams {
     pub height: u32,
     /*smart: bool,
     filters: Vec<String>,*/
-    image: String,
+    pub image: String,
 }
 
 /// parse thumbor style url (without hmac signature)

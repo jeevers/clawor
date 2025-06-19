@@ -16,6 +16,6 @@ photon-rs = "0.3.3"
 regex = "1.11.1"
 secrecy = "0.10.3"
 sha1 = "0.10.6"
-tokio = { version = "1.45.1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.45.1", features = ["macros", "rt-multi-thread", "fs"] }
 tracing = { version = "0.1.41", features = ["std"] }
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "registry", "std", "fmt"] }

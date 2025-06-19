@@ -1,5 +1,5 @@
 use crate::common::hmac_signature;
-use base64::{engine::general_purpose::STANDARD, engine::general_purpose::URL_SAFE};
+use base64::engine::general_purpose::URL_SAFE;
 use clap::Args;
 use secrecy::SecretString;
 
@@ -22,9 +22,5 @@ pub struct PathSigArgs {
 #[tracing::instrument]
 pub fn thumbor_path_signature(args: &PathSigArgs) {
     let signature_urlsafe = hmac_signature(args.secret_key.clone(), args.part.clone(), &URL_SAFE);
-    let signature = hmac_signature(args.secret_key.clone(), args.part.clone(), &STANDARD);
-    println!(
-        "signature (urlsafe):     {}\nsignature (non-urlsafe): {}",
-        signature_urlsafe, signature
-    );
+    println!("{}/{}", signature_urlsafe, args.part);
 }
