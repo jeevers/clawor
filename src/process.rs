@@ -1,12 +1,11 @@
 /// for `process` subcommand
 use clap::Args;
+use image::{DynamicImage, ImageFormat, ImageReader};
 use std::path::PathBuf;
 //use photon_rs::channels::alter_red_channel;
 use crate::common::parse_thumbor_path;
-use crate::image_processing::resize_image;
-use photon_rs::native::{open_image, save_image};
-use photon_rs::transform::compress;
-use photon_rs::PhotonImage;
+use crate::image_processing::resize_image_imagers;
+use std::io::Cursor;
 
 /// opens image, transforms image based on supplied options and then saves the transformed image to
 /// disk. output format is inferred from file extension (photon-rs' behavior)
@@ -36,21 +35,44 @@ pub fn process(args: &ProcessArgs) {
     println!("source: {}", args.src_file.display());
     println!("destination: {}", args.dst_file.display());
 
-    let img = open_image(args.src_file.clone()).expect("File should open");
-    let mut output: PhotonImage = img.clone();
+    let image_file: Vec<u8> =
+        std::fs::read(&args.src_file).expect("file should be opened and read");
+    let imagebuf = Cursor::new(image_file);
+
+    let img = ImageReader::new(imagebuf)
+        .with_guessed_format()
+        .expect("File should open");
+    let orig_format = img.format();
+    println!("orig - format:{:?}", orig_format);
+    let mut output: DynamicImage = img.decode().expect("image should be decoded");
+    println!("orig - color:{:?}", output.color());
 
     if args.url != "" {
         let _ =
             parse_thumbor_path(args.url.clone(), args.no_hash.clone()).expect("url is parsable");
     } else {
         match &args.resize {
-            Some(dimensions) => output = resize_image(&mut output, dimensions.to_string()),
+            Some(dimensions) => {
+                let dimstr = dimensions.to_string();
+                let dims: Vec<&str> = dimstr.split("x").collect();
+                let width: u32 = dims[0].parse().unwrap();
+                let height: u32 = dims[1].parse().unwrap();
+                output = resize_image_imagers(&output, width, height);
+            }
             None => (),
         }
-        match &args.compress {
-            Some(quality) => output = compress(&mut output, *quality),
-            None => (),
+    }
+    println!("output - color:{:?}", output.color());
+    let dest_format = match ImageFormat::from_path(&args.dst_file) {
+        Ok(val) => val,
+        Err(err) => {
+            println!("error determining destination format from path: {}", err);
+            ImageFormat::Jpeg
         }
-        save_image(output, args.dst_file.clone()).expect("output file should be written");
+    };
+
+    match dest_format {
+        ImageFormat::Jpeg => output.into_rgb8().save(&args.dst_file).unwrap(),
+        _ => output.save(&args.dst_file).unwrap(),
     }
 }
