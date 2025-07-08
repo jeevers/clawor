@@ -1,3 +1,4 @@
+use anyhow::anyhow;
 /// for common utility functions used by multiple subcommands
 use base64::display::Base64Display;
 use hmac::{Hmac, Mac};
@@ -51,7 +52,7 @@ pub struct ThumborUrlParams {
 }
 
 /// parse thumbor style url (without hmac signature)
-pub fn parse_thumbor_path(path: String, no_hash: bool) -> Result<ThumborUrlParams, &'static str> {
+pub fn parse_thumbor_path(path: String, no_hash: bool) -> Result<ThumborUrlParams, anyhow::Error> {
     // adapted from libthumbor:
     // https://github.com/thumbor/libthumbor/blob/master/libthumbor/url.py
     let mut thumbor_req: ThumborUrlParams = Default::default();
@@ -93,7 +94,7 @@ pub fn parse_thumbor_path(path: String, no_hash: bool) -> Result<ThumborUrlParam
     let re = Regex::new(&full_regex).unwrap();
 
     let Some(caps) = re.captures(&path) else {
-        return Err("regex failed");
+        return Err(anyhow!("regex failed"));
     };
 
     println!("{:?}", &caps);

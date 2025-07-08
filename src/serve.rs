@@ -1,22 +1,25 @@
 /// for `serve` subcommand
 use crate::common::{hmac_signature, parse_thumbor_path};
+use anyhow::{anyhow, bail};
 use axum::{
     Router,
     body::Body,
     extract::Path,
     extract::State,
     http::{StatusCode, header},
-    response::Response,
+    response::{IntoResponse, Response},
     routing::get,
 };
 use base64::engine::general_purpose::URL_SAFE;
 use clap::Args;
+use core::error;
+use image::{DynamicImage, ImageFormat, ImageReader};
 use photon_rs::PhotonImage;
 use secrecy::SecretString;
-use std::path::PathBuf;
 use std::sync::Arc;
+use std::{error::Error, io::Cursor, path::PathBuf};
 use tokio::fs::read;
-use tracing::{Level, debug, error, info, span};
+use tracing::{debug, error, info};
 
 /// Starts a webserver that serves transformed images based on thumbor's url path scheme
 #[derive(Args)]
@@ -45,6 +48,41 @@ struct AppState {
     signature_secret: SecretString,
 }
 
+#[derive(Debug)]
+struct UrlError {
+    message: String,
+}
+
+#[derive(Debug)]
+struct ImageError {
+    image: String,
+    message: String,
+}
+
+// the error ahndling for pic_handler was getting.... unweildy
+// adapted axum's example here to simply that:
+// https://github.com/tokio-rs/axum/blob/main/examples/error-handling/src/main.rs
+struct AppError(anyhow::Error);
+
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        (
+            StatusCode::NOT_FOUND,
+            format!("Something went wrong: {}", self.0),
+        )
+            .into_response()
+    }
+}
+
+impl<E> From<E> for AppError
+where
+    E: Into<anyhow::Error>,
+{
+    fn from(err: E) -> Self {
+        Self(err.into())
+    }
+}
+
 /// simple health check
 #[tracing::instrument]
 async fn health_handler(State(state): State<Arc<AppState>>) -> String {
@@ -61,75 +99,35 @@ async fn health_handler(State(state): State<Arc<AppState>>) -> String {
 async fn pic_handler(
     Path((hmac, part)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
-) -> Response {
+) -> Result<Response, AppError> {
     info!("THUM ON MY BOR TILL IT RESIZE");
 
     let computed_hmac = hmac_signature(state.signature_secret.clone(), part.clone(), &URL_SAFE);
 
-    let parsed_url = parse_thumbor_path(format!("{}/{}", hmac, part), false);
-    // TODO: check signature
-    match parsed_url {
-        Ok(url) => {
-            if url.hash.unwrap() != computed_hmac {
-                error!("hash validation/verification failed");
-                return Response::builder()
-                    .status(StatusCode::BAD_REQUEST)
-                    .header(header::SERVER, "axum-clawor")
-                    .header(header::CONTENT_TYPE, "text/plain")
-                    .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
-                    .body(Body::from("invalid url"))
-                    .unwrap();
-            } else {
-                let image_path = state.src_path.join(url.image);
-                let image_data = read(&image_path).await;
-                match image_data {
-                    Err(err) => {
-                        debug!(
-                            "failed to open '{}': {}",
-                            &image_path.to_str().unwrap(),
-                            err
-                        );
-                        return Response::builder()
-                            .status(StatusCode::NOT_FOUND)
-                            .header(header::SERVER, "axum-clawor")
-                            .header(header::CONTENT_TYPE, "text/plain")
-                            .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
-                            .body(Body::from("shrugmoji"))
-                            .unwrap();
-                    }
-                    Ok(file) => {
-                        let phimage = PhotonImage::new_from_byteslice(file);
-                        return Response::builder()
-                            .status(StatusCode::OK)
-                            .header(header::SERVER, "axum-clawor")
-                            .header("x-clawor-hmac", &hmac)
-                            .header("x-clawor-computed-hmac", &computed_hmac)
-                            .header("x-clawor-part", &part)
-                            .header(
-                                "x-clawor-src-path",
-                                state.src_path.clone().to_str().unwrap(),
-                            )
-                            .header(
-                                "x-clawor-cache-path",
-                                state.cache_path.clone().to_str().unwrap(),
-                            )
-                            .body(Body::from(phimage.get_bytes_jpeg(50))) // get_bytes returns png
-                            .unwrap();
-                    }
-                }
-            }
-        }
-        Err(_err) => {
-            error!("regex parsing failed");
-            return Response::builder()
-                .status(StatusCode::BAD_REQUEST)
-                .header(header::SERVER, "axum-clawor")
-                .header(header::CONTENT_TYPE, "text/plain")
-                .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
-                .body(Body::from("invalid url"))
-                .unwrap();
-        }
+    let parsed_url = parse_thumbor_path(format!("{}/{}", hmac, part), false)?;
+    if parsed_url.hash.unwrap_or("NOHASH".to_string()) != computed_hmac {
+        error!("hash validation/verification failed");
+        return Err(anyhow!("hash validation/verification failed").into());
     }
+    let image_path = state.src_path.join(parsed_url.image);
+    let image_data = read(&image_path).await?;
+    let imgbuf = Cursor::new(image_data);
+    let img = ImageReader::new(imgbuf).with_guessed_format()?.decode()?;
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header(header::SERVER, "axum-clawor")
+        .header("x-clawor-hmac", &hmac)
+        .header("x-clawor-computed-hmac", &computed_hmac)
+        .header("x-clawor-part", &part)
+        .header(
+            "x-clawor-src-path",
+            state.src_path.clone().to_str().unwrap(),
+        )
+        .header(
+            "x-clawor-cache-path",
+            state.cache_path.clone().to_str().unwrap(),
+        )
+        .body(Body::from(img.into_bytes()))?)
 }
 
 /// starts axum webserver
