@@ -12,9 +12,7 @@ use axum::{
 };
 use base64::engine::general_purpose::URL_SAFE;
 use clap::Args;
-use core::error;
 use image::{DynamicImage, ImageFormat, ImageReader};
-use photon_rs::PhotonImage;
 use secrecy::SecretString;
 use std::sync::Arc;
 use std::{error::Error, io::Cursor, path::PathBuf};
